@@ -51,7 +51,6 @@ fun HomeScreen(navController: NavController) {
 
         val dailyGoal by UserPreferences.goalFlow(context).collectAsState(initial = 10000)
         val dailySteps by UserPreferences.dailyStepsFlow(context).collectAsState(initial = 0)
-
         val progress = (dailySteps.toFloat() / dailyGoal.coerceAtLeast(1)).coerceAtMost(1f)
         val treeScale = 0.7f + progress * 1.4f
         val animatedProgress by animateFloatAsState(progress)
