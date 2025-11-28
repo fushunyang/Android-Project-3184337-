@@ -56,7 +56,7 @@ fun HomeScreen(navController: NavController) {
         val animatedProgress by animateFloatAsState(progress)
         val animatedScale by animateFloatAsState(treeScale)
 
-        // === 永不丢步的硬件计步（终极稳定版）===
+        // step count
         val stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
         if (stepCounterSensor != null) {
             val listener = remember {
@@ -92,7 +92,7 @@ fun HomeScreen(navController: NavController) {
                 onDispose { sensorManager.unregisterListener(listener) }
             }
         } else {
-            // 加速度降级（已优化到极致）
+            // Accelerometer
             val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
             if (accelerometer != null) {
                 var lastStepTime by remember { mutableLongStateOf(0L) }
