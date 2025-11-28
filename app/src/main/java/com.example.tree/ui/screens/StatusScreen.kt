@@ -88,7 +88,6 @@ fun StatusScreen(navController: NavController) {
                 }
             }
         }
-
         // ==================== Permission Launcher ====================
         val permissionLauncher = rememberLauncherForActivityResult(
             contract = ActivityResultContracts.RequestPermission()
