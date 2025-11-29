@@ -11,12 +11,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -28,154 +29,191 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.graphics.Color
+import androidx.datastore.preferences.core.edit
 import com.example.tree.data.UserPreferences
-import kotlinx.coroutines.delay
+import com.example.tree.data.dataStore
+import com.example.tree.ui.theme.*
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
 import kotlin.math.sqrt
-import kotlin.ranges.coerceAtLeast
-import kotlin.ranges.coerceAtMost
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(navController: NavController) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
-    val accelerometer = remember { sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER) }
+    TreeTheme {
+        val context = LocalContext.current
+        val coroutineScope = rememberCoroutineScope()
+        val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
+        val colorScheme = MaterialTheme.colorScheme
 
-    var totalSteps by remember { mutableIntStateOf(0) }
-    var dailyGoal by remember { mutableIntStateOf(5000) }
-    var displaySteps by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) {
-        dailyGoal = UserPreferences.goalFlow(context).first()
-    }
-// push to refresh
-    LaunchedEffect(totalSteps) {
-        while (isActive) {
-            displaySteps = totalSteps
-            delay(1000)
-        }
-    }
+        val dailyGoal by UserPreferences.goalFlow(context).collectAsState(initial = 10000)
+        val dailySteps by UserPreferences.dailyStepsFlow(context).collectAsState(initial = 0)
 
-    val progress = (totalSteps.toFloat() / dailyGoal.coerceAtLeast(1)).coerceAtMost(1f)
-    val treeScale = 0.7f + progress * 1.4f
+        val progress = (dailySteps.toFloat() / dailyGoal.coerceAtLeast(1)).coerceAtMost(1f)
+        val treeScale = 0.7f + progress * 1.4f
+        val animatedProgress by animateFloatAsState(progress)
+        val animatedScale by animateFloatAsState(treeScale)
 
-    val animatedProgress by animateFloatAsState(progress, label = "progress")
-    val animatedScale by animateFloatAsState(treeScale, label = "treeScale")
+        // === 永不丢步的硬件计步（终极稳定版）===
+        val stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        if (stepCounterSensor != null) {
+            val listener = remember {
+                object : SensorEventListener {
+                    override fun onSensorChanged(event: SensorEvent?) {
+                        event ?: return
+                        val total = event.values[0].toLong()
+                        coroutineScope.launch {
+                            val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                            val data = context.dataStore.data.first()
+                            val savedDate = data[UserPreferences.LAST_DATE_KEY] ?: today
+                            val savedTotal = data[UserPreferences.LAST_TOTAL_STEPS_KEY] ?: total
+                            var currentDaily = data[UserPreferences.DAILY_STEPS_KEY] ?: 0
 
-    var previousMagnitude by remember { mutableStateOf<Float?>(null) }
-    var lastStepTime by remember { mutableLongStateOf(0L) }
+                            var delta = total - savedTotal
+                            if (delta < 0) delta = total
 
-    val stepListener = remember {
-        object : SensorEventListener {
-            override fun onSensorChanged(event: SensorEvent?) {
-                if (event?.sensor?.type != Sensor.TYPE_ACCELEROMETER) return
-                val mag = sqrt(event.values[0] * event.values[0] + event.values[1] * event.values[1] + event.values[2] * event.values[2])
-                val last = previousMagnitude ?: mag
-                previousMagnitude = mag
-                val delta = mag - last
-                val now = System.currentTimeMillis()
+                            if (savedDate != today) currentDaily = delta.toInt().coerceAtLeast(0)
+                            else currentDaily += delta.toInt().coerceAtLeast(0)
 
-                if (delta > 5f && now - lastStepTime > 100) {
-                    totalSteps++
-                    lastStepTime = now
+                            context.dataStore.edit {
+                                it[UserPreferences.DAILY_STEPS_KEY] = currentDaily
+                                it[UserPreferences.LAST_TOTAL_STEPS_KEY] = total
+                                it[UserPreferences.LAST_DATE_KEY] = today
+                            }
+                        }
+                    }
+                    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
                 }
             }
-            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+            DisposableEffect(Unit) {
+                sensorManager.registerListener(listener, stepCounterSensor, SensorManager.SENSOR_DELAY_NORMAL)
+                onDispose { sensorManager.unregisterListener(listener) }
+            }
+        } else {
+            // 加速度降级（已优化到极致）
+            val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            if (accelerometer != null) {
+                var lastStepTime by remember { mutableLongStateOf(0L) }
+                val listener = remember {
+                    object : SensorEventListener {
+                        override fun onSensorChanged(event: SensorEvent?) {
+                            event ?: return
+                            val mag = sqrt(event.values[0]*event.values[0] + event.values[1]*event.values[1] + event.values[2]*event.values[2])
+                            if (mag > 13.5f) {
+                                val now = System.currentTimeMillis()
+                                if (now - lastStepTime > 380) {
+                                    coroutineScope.launch {
+                                        context.dataStore.edit {
+                                            it[UserPreferences.DAILY_STEPS_KEY] = (dailySteps + 1).coerceAtLeast(0)
+                                        }
+                                    }
+                                    lastStepTime = now
+                                }
+                            }
+                        }
+                        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                    }
+                }
+                DisposableEffect(Unit) {
+                    sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+                    onDispose { sensorManager.unregisterListener(listener) }
+                }
+            }
         }
-    }
 
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(Unit) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> accelerometer?.let {
-                    sensorManager.registerListener(
-                        stepListener,
-                        it,
-                        SensorManager.SENSOR_DELAY_GAME
+        Scaffold(
+            containerColor = Color.Transparent,
+            bottomBar = {
+                NavigationBar(containerColor = colorScheme.surface.copy(alpha = 0.96f), tonalElevation = 20.dp) {
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = { navController.navigate("settings") },
+                        icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
+                        label = { Text("Settings", color = TreeTextGood.copy(alpha = 0.8f)) }
+                    )
+                    NavigationBarItem(
+                        selected = false,
+                        onClick = { navController.navigate("history") },
+                        icon = { Icon(Icons.Default.History, contentDescription = "History") },
+                        label = { Text("History", color = TreeTextGood.copy(alpha = 0.8f)) }
+                    )
+                    NavigationBarItem(
+                        selected = true,
+                        onClick = { navController.navigate("status") },
+                        icon = { Icon(Icons.Default.Info, contentDescription = "Status") },
+                        label = { Text("Status", color = colorScheme.primary) }
                     )
                 }
-
-                Lifecycle.Event.ON_PAUSE -> sensorManager.unregisterListener(stepListener)
-                else -> {}
             }
-        }
-        lifecycle.addObserver(observer)
-        onDispose {
-            lifecycle.removeObserver(observer)
-            sensorManager.unregisterListener(stepListener)
-        }
-    }
-//Optimize the original box
-
-    Box(modifier = Modifier.fillMaxSize().background(
-        brush = Brush.verticalGradient(listOf(Color(0xFFE8F5E9), Color(0xFFB9F6CA), Color.White))
-    )) {
-        Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(60.dp))
-
-            Box(contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(
-                    progress = { animatedProgress },
-                    modifier = Modifier.size(210.dp),
-                    strokeWidth = 18.dp,
-                    color = Color(0xFF4CAF50),
-                    trackColor = Color(0x33000000)
-                )
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("$displaySteps", fontSize = 56.sp, fontWeight = FontWeight.Black, color = Color(0xFF1B5E20))
-                    Text("/ $dailyGoal Step", fontSize = 18.sp, color = Color(0xFF2E7D32))
-                }
-            }
-
-            Spacer(Modifier.height(60.dp))
-
-            Image(
-                painter = painterResource(R.drawable.tree),
-                contentDescription = "Growing Tree",
-                modifier = Modifier.size(280.dp).scale(animatedScale).clip(RoundedCornerShape(32.dp))
-            )
-
-            Spacer(Modifier.height(32.dp))
-
-            Card(
-                modifier = Modifier.fillMaxWidth(0.9f),
-                shape = RoundedCornerShape(32.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFFDE7)),
-                elevation = CardDefaults.cardElevation(12.dp)
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.verticalGradient(
+                            listOf(colorScheme.treeBgTop, colorScheme.treeBgMid1, colorScheme.treeBgMid2, colorScheme.treeBgBottom)
+                        )
+                    )
+                    .padding(paddingValues)
             ) {
-                Text(
-                    text = if (progress >= 1f) "Goal achieved! Your tree has grown into a towering giant!"
-                    else "Every step is watering your sapling.",
-                    modifier = Modifier.padding(20.dp),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF5D4037),
-                    textAlign = TextAlign.Center
-                )
-            }
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 28.dp, vertical = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Spacer(Modifier.height(60.dp))
 
-            Spacer(Modifier.weight(1f))
+                    Box(contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            progress = { animatedProgress },
+                            modifier = Modifier.size(240.dp),
+                            strokeWidth = 22.dp,
+                            color = colorScheme.primary,
+                            trackColor = colorScheme.outline.copy(alpha = 0.3f)
+                        )
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("$dailySteps", fontSize = 64.sp, fontWeight = FontWeight.Black, color = TreeStepBig)
+                            Text("/ $dailyGoal steps", fontSize = 20.sp, color = TreeGoalText)
+                        }
+                    }
 
-            NavigationBar(containerColor = Color.White.copy(alpha = 0.95f)) {
-                NavigationBarItem(selected = false, onClick = { navController.navigate("settings") }, icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Setting") })
-                NavigationBarItem(selected = false, onClick = { navController.navigate("history") }, icon = { Icon(Icons.Default.History, null) }, label = { Text("History") })
-                NavigationBarItem(selected = true, onClick = { navController.navigate("status") }, icon = { Icon(Icons.Default.Info, null) }, label = { Text("Status") })
+                    Spacer(Modifier.height(80.dp))
+
+                    Image(
+                        painter = painterResource(R.drawable.tree),
+                        contentDescription = "Your Growing Tree",
+                        modifier = Modifier.size(320.dp).scale(animatedScale).clip(RoundedCornerShape(40.dp))
+                    )
+
+                    Spacer(Modifier.height(40.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(0.92f),
+                        shape = RoundedCornerShape(36.dp),
+                        colors = CardDefaults.cardColors(containerColor = colorScheme.surface.copy(alpha = 0.97f)),
+                        elevation = CardDefaults.cardElevation(16.dp)
+                    ) {
+                        Text(
+                            text = when {
+                                progress >= 1f -> "Goal achieved! Your tree is now a towering giant! 🌳✨"
+                                progress >= 0.8f -> "Almost there! Just a few more steps!"
+                                progress >= 0.5f -> "Halfway done! Your tree is thriving!"
+                                else -> "Every step waters your little sapling. Keep going! 🌱"
+                            },
+                            modifier = Modifier.padding(24.dp),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = colorScheme.onSurface,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    Spacer(Modifier.weight(1f))
+                }
             }
         }
     }

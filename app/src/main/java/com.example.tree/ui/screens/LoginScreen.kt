@@ -16,7 +16,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import kotlin.apply
+import com.example.tree.ui.theme.*
 
 @Composable
 fun LoginScreen(navController: NavController) {
@@ -41,7 +41,7 @@ fun LoginScreen(navController: NavController) {
                 text = "Login",
                 style = MaterialTheme.typography.headlineLarge,
                 fontSize = 32.sp,
-                color = Color(0xFF1A1A1A),
+                color = TreeLoginTitleColor,
                 modifier = Modifier.padding(bottom = 48.dp)
             )
 
@@ -52,11 +52,12 @@ fun LoginScreen(navController: NavController) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFF1976D2),
-                    unfocusedBorderColor = Color(0xFFE0E0E0)
+                    focusedBorderColor = TreeLocationIcon,
+                    unfocusedBorderColor = TreeProgressTrack
                 )
-            )// TODO:check mail
+            )
             Spacer(modifier = Modifier.height(24.dp))
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -69,19 +70,19 @@ fun LoginScreen(navController: NavController) {
                     modifier = Modifier.weight(1f),
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF1976D2),
-                        unfocusedBorderColor = Color(0xFFE0E0E0)
+                        focusedBorderColor = TreeLocationIcon,
+                        unfocusedBorderColor = TreeProgressTrack
                     )
                 )
                 Text(
                     text = "Forgot?",
-                    color = Color(0xFF666666),
+                    color = TreeLoginSecondaryText,
                     fontSize = 14.sp,
                     modifier = Modifier
                         .padding(start = 8.dp)
                         .clickable { }
                 )
-            }//TODO:2
+            }
             Spacer(modifier = Modifier.height(40.dp))
 
             Button(
@@ -91,7 +92,7 @@ fun LoginScreen(navController: NavController) {
                     .height(56.dp),
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF0D1B2A),
+                    containerColor = TreeLoginButtonBg,
                     contentColor = Color.White
                 )
             ) {
@@ -102,20 +103,21 @@ fun LoginScreen(navController: NavController) {
 
             Text(
                 text = "Don't have account? Create now",
-                color = Color(0xFF666666),
+                color = TreeLoginSecondaryText,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { 123}
+                    .clickable { }
             )
         }
     }
-}//TODO:choose later last one the achieve
+}
+
 @Composable
 private fun MountainBackground() {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        drawRect(color = Color(0xFFE3F2FD))
+        drawRect(color = TreeLocationCard)
         val path = Path().apply {
             moveTo(0f, size.height * 0.28f)
             quadraticBezierTo(size.width / 2, size.height * 0.50f, size.width, size.height * 0.28f)

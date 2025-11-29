@@ -1,4 +1,3 @@
-// ui/theme/Type.kt
 package com.example.tree.ui.theme
 
 import androidx.compose.material3.Typography

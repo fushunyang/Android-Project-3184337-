@@ -1,4 +1,4 @@
-// MainActivity.kt
+
 package com.example.tree
 
 import android.os.Bundle
