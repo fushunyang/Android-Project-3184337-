@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.min
 import kotlin.math.sqrt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -55,6 +56,19 @@ fun HomeScreen(navController: NavController) {
         val treeScale = 0.7f + progress * 1.4f
         val animatedProgress by animateFloatAsState(progress)
         val animatedScale by animateFloatAsState(treeScale)
+
+        // Calculate tree stage based on steps (every 1000 steps, up to 7 stages)
+        val treeStage = min(7, (dailySteps / 1000) + 1)
+        val treeResourceId = when (treeStage) {
+            1 -> R.drawable.stage1 //  (stage 1: 0-999 steps)
+            2 -> R.drawable.stage2 //  (stage 2: 1000-1999 steps)
+            3 -> R.drawable.stage3 //  (stage 3: 2000-2999 steps)
+            4 -> R.drawable.stage4 //  (stage 4: 3000-3999 steps)
+            5 -> R.drawable.stage5 //  (stage 5: 4000-4999 steps)
+            6 -> R.drawable.stage6 //  (stage 6: 5000-5999 steps)
+            7 -> R.drawable.stage7 //  (stage 7: 6000+ steps)
+            else -> R.drawable.stage1
+        }
 
         // step count
         val stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
@@ -183,8 +197,8 @@ fun HomeScreen(navController: NavController) {
                     Spacer(Modifier.height(80.dp))
 
                     Image(
-                        painter = painterResource(R.drawable.tree),
-                        contentDescription = "Your Growing Tree",
+                        painter = painterResource(treeResourceId),
+                        contentDescription = "Your Growing Tree - Stage $treeStage",
                         modifier = Modifier.size(320.dp).scale(animatedScale).clip(RoundedCornerShape(40.dp))
                     )
 

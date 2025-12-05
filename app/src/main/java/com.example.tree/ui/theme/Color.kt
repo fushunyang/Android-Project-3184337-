@@ -17,3 +17,4 @@ val TreeLoginTitleColor      = Color(0xFF1A1A1A)   // "Login" 大标题
 val TreeLoginSecondaryText   = Color(0xFF666666)   // "Forgot?" 和 "Don't have account?" 等灰色文字
 val TreeLoginButtonBg        = Color(0xFF0D1B2A)   // 登录按钮背景深色
 // ============================================================
+val bottomOntheHistory       = Color(color = 0xFF4CAF50)
