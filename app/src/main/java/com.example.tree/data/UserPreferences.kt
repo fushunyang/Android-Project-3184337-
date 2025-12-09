@@ -5,63 +5,78 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "tree_prefs")
 
 object UserPreferences {
-    // Key 定义
-    val DAILY_STEPS_KEY = intPreferencesKey("daily_steps")
-    val LAST_TOTAL_STEPS_KEY = longPreferencesKey("last_total_steps")
-    val LAST_DATE_KEY = stringPreferencesKey("last_date")
-    val GOAL_KEY = intPreferencesKey("daily_goal")
-    val HISTORY_STEPS_KEY = stringSetPreferencesKey("history_steps")  // 历史记录（Set 自动去重）
+    // ==================== Account Related ====================
+    val EMAIL_KEY = stringPreferencesKey("user_email")
+    val PASSWORD_KEY = stringPreferencesKey("user_password")
+    val IS_LOGGED_IN_KEY = booleanPreferencesKey("is_logged_in")
 
-    // 每日步数 Flow（实时）
+    // ==================== Dynamic Keys (Per-Email Independent Data) ====================
+    fun dailyStepsKey(email: String) = intPreferencesKey("daily_steps_$email")
+    fun goalKey(email: String) = intPreferencesKey("daily_goal_$email")
+    fun historyStepsKey(email: String) = stringSetPreferencesKey("history_steps_$email")
+    fun lastTotalStepsKey(email: String) = longPreferencesKey("last_total_steps_$email")
+    fun lastDateKey(email: String) = stringPreferencesKey("last_date_$email")
+
+    suspend fun getCurrentEmail(context: Context): String {
+        return context.dataStore.data.first()[EMAIL_KEY] ?: ""
+    }
+
+    // ==================== Flows ====================
     fun dailyStepsFlow(context: Context): Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[DAILY_STEPS_KEY] ?: 0
+        val email = prefs[EMAIL_KEY] ?: return@map 0
+        prefs[dailyStepsKey(email)] ?: 0
     }
 
-    // 目标步数 Flow
     fun goalFlow(context: Context): Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[GOAL_KEY] ?: 10000
+        val email = prefs[EMAIL_KEY] ?: return@map 10000
+        prefs[goalKey(email)] ?: 10000
     }
 
-    // 历史记录 Flow（返回 List<Pair<日期, 步数>>，已按日期倒序）
     fun historyStepsFlow(context: Context): Flow<List<Pair<String, Int>>> = context.dataStore.data.map { prefs ->
-        val set = prefs[HISTORY_STEPS_KEY] ?: emptySet()
+        val email = prefs[EMAIL_KEY] ?: return@map emptyList()
+        val set = prefs[historyStepsKey(email)] ?: emptySet()
         set.mapNotNull { entry ->
             val parts = entry.split(":", limit = 2)
-            if (parts.size == 2) {
-                parts[0] to (parts[1].toIntOrNull() ?: 0)
-            } else null
+            if (parts.size == 2) parts[0] to (parts[1].toIntOrNull() ?: 0) else null
         }.sortedByDescending { it.first }
     }
 
-    // 保存目标
+    fun isLoggedInFlow(context: Context): Flow<Boolean> =
+        context.dataStore.data.map { it[IS_LOGGED_IN_KEY] ?: false }
+
+    fun savedEmailFlow(context: Context): Flow<String> = context.dataStore.data.map { it[EMAIL_KEY] ?: "" }
+
+    // ==================== Operations ====================
     suspend fun saveGoal(context: Context, goal: Int) {
-        context.dataStore.edit { prefs ->
-            prefs[GOAL_KEY] = goal.coerceIn(1000, 50000)
+        val email = getCurrentEmail(context)
+        if (email.isBlank()) return
+        context.dataStore.edit { it[goalKey(email)] = goal.coerceIn(1000, 50000) }
+    }
+
+    suspend fun savePreviousDayToHistory(context: Context, previousDate: String, previousSteps: Int) {
+        if (previousSteps <= 0 || previousDate.isBlank()) return
+        val email = getCurrentEmail(context)
+        if (email.isBlank()) return
+        val entry = "$previousDate:$previousSteps"
+        context.dataStore.edit {
+            val key = historyStepsKey(email)
+            val set = (it[key] ?: emptySet()).toMutableSet()
+            if (entry !in set) set.add(entry)
+            it[key] = set
         }
     }
 
-    // ★★★★★ 关键新增：自动把「昨天」的步数保存到历史记录（跨天时调用）★★★★★
-    suspend fun savePreviousDayIfNeeded(
-        context: Context,
-        previousDate: String,
-        previousDaySteps: Int
-    ) {
-        // 只有昨天有步数才保存（避免保存 0）
-        if (previousDaySteps <= 0 || previousDate.isBlank()) return
-
-        val entry = "$previousDate:$previousDaySteps"
-
-        context.dataStore.edit { prefs ->
-            val currentSet = (prefs[HISTORY_STEPS_KEY] ?: emptySet()).toMutableSet()
-            if (entry !in currentSet) {
-                currentSet.add(entry)
-                prefs[HISTORY_STEPS_KEY] = currentSet
-            }
+    suspend fun saveCredentials(context: Context, email: String, password: String) {
+        context.dataStore.edit {
+            it[EMAIL_KEY] = email.trim()
+            it[PASSWORD_KEY] = password
+            it[IS_LOGGED_IN_KEY] = true
         }
     }
 }
