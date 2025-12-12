@@ -1,5 +1,5 @@
-
 package com.example.tree.ui.screens
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,17 +14,20 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.edit
 import androidx.navigation.NavController
 import com.example.tree.data.UserPreferences
+import com.example.tree.data.dataStore
 import com.example.tree.ui.theme.*
 import kotlinx.coroutines.launch
 
 @Composable
-fun RegisterScreen(navController: NavController) {
+fun ResetPasswordScreen(navController: NavController) {
     var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmNewPassword by remember { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf("") }
+    var successMsg by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
 
@@ -43,7 +46,7 @@ fun RegisterScreen(navController: NavController) {
             Spacer(modifier = Modifier.height(screenHeight * 0.3f))
 
             Text(
-                text = "Create Account",
+                text = "Reset Password",
                 style = MaterialTheme.typography.headlineLarge,
                 fontSize = 32.sp,
                 color = TreeLoginTitleColor,
@@ -64,9 +67,9 @@ fun RegisterScreen(navController: NavController) {
             Spacer(modifier = Modifier.height(24.dp))
 
             OutlinedTextField(
-                value = password,
-                onValueChange = { password = it },
-                label = { Text("Password") },
+                value = newPassword,
+                onValueChange = { newPassword = it },
+                label = { Text("New Password") },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -78,9 +81,9 @@ fun RegisterScreen(navController: NavController) {
             Spacer(modifier = Modifier.height(24.dp))
 
             OutlinedTextField(
-                value = confirmPassword,
-                onValueChange = { confirmPassword = it },
-                label = { Text("Confirm Password") },
+                value = confirmNewPassword,
+                onValueChange = { confirmNewPassword = it },
+                label = { Text("Confirm New Password") },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -92,7 +95,22 @@ fun RegisterScreen(navController: NavController) {
 
             if (errorMsg.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
-                Text(errorMsg, color = Color.Red, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                Text(
+                    errorMsg,
+                    color = Color.Red,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            if (successMsg.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    successMsg,
+                    color = Color.Green,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
             Spacer(modifier = Modifier.height(40.dp))
@@ -100,21 +118,25 @@ fun RegisterScreen(navController: NavController) {
             Button(
                 onClick = {
                     when {
-                        email.isBlank() || password.isBlank() || confirmPassword.isBlank() -> errorMsg = "Please fill all fields"
-                        password != confirmPassword -> errorMsg = "Passwords do not match!"
+                        email.isBlank() || newPassword.isBlank() || confirmNewPassword.isBlank() ->
+                            errorMsg = "Please fill all fields"
+                        newPassword != confirmNewPassword ->
+                            errorMsg = "New passwords do not match!"
+                        newPassword.length < 6 ->
+                            errorMsg = "Password must be at least 6 characters long"
                         else -> {
                             coroutineScope.launch {
                                 val trimmedEmail = email.trim()
-                                if (UserPreferences.isEmailRegistered(context, trimmedEmail)) {
-                                    errorMsg = "Email already registered. Please log in."
-
+                                if (!UserPreferences.isEmailRegistered(context, trimmedEmail)) {
+                                    errorMsg = "Email not found. Please register first."
                                 } else {
-                                    UserPreferences.saveCredentials(context, trimmedEmail, password)
-                                    navController.navigate("home") {
-                                        popUpTo(0) { inclusive = true }
-                                        launchSingleTop = true
+                                    // Update password for the email (does not log in automatically)
+                                    context.dataStore.edit {
+                                        val passwordKey = UserPreferences.passwordKey(trimmedEmail)
+                                        it[passwordKey] = newPassword
                                     }
                                     errorMsg = ""
+                                    successMsg = "Password reset successfully. Please log in."
                                 }
                             }
                         }
@@ -124,13 +146,13 @@ fun RegisterScreen(navController: NavController) {
                 shape = RoundedCornerShape(12.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = TreeLoginButtonBg)
             ) {
-                Text("Create Account", fontSize = 18.sp, color = Color.White)
+                Text("Reset Password", fontSize = 18.sp, color = Color.White)
             }
 
             Spacer(modifier = Modifier.height(32.dp))
 
             Text(
-                text = "Already have an account? Log in",
+                text = "Back to Login",
                 color = TreeLoginSecondaryText,
                 fontSize = 14.sp,
                 textAlign = TextAlign.Center,
@@ -138,7 +160,7 @@ fun RegisterScreen(navController: NavController) {
                     .fillMaxWidth()
                     .clickable {
                         navController.navigate("login") {
-                            popUpTo("register") { inclusive = true }
+                            popUpTo("reset_password") { inclusive = true }
                         }
                     }
             )

@@ -5,8 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.DirectionsWalk  // Import for the icon
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,10 +17,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.navigation.NavController
 import com.example.tree.data.UserPreferences
 import com.example.tree.data.dataStore
+import com.example.tree.ui.theme.*
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -29,14 +34,17 @@ fun SettingsScreen(navController: NavController) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    // 实时读取当前目标步数
+    // Collect current email for key generation
+    val currentEmail by UserPreferences.savedEmailFlow(context).collectAsState(initial = "")
+
+    // Real-time read current goal steps
     val currentGoal by UserPreferences.goalFlow(context).collectAsState(initial = 10000)
     var goalText by remember(currentGoal) { mutableStateOf(currentGoal.toString()) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFFFFDF7)) // 与你截图完全一致的浅米色背景
+            .background(Color(0xFFFFFDF7)) // Exact light beige background matching screenshot
     ) {
         Card(
             modifier = Modifier
@@ -63,20 +71,20 @@ fun SettingsScreen(navController: NavController) {
 
                 Spacer(modifier = Modifier.height(60.dp))
 
-                // 输入框（完全复制你截图的样式）
+                // Input field (exact style from screenshot)
                 OutlinedTextField(
                     value = goalText,
                     onValueChange = { input ->
-                        // 只允许数字输入
+                        // Only allow numeric input
                         if (input.isEmpty() || input.all { it.isDigit() }) {
                             goalText = input
                         }
                     },
                     leadingIcon = {
                         Icon(
-                            Icons.Default.DirectionsWalk,
+                            Icons.AutoMirrored.Filled.DirectionsWalk,
                             contentDescription = null,
-                            tint = Color(0xFF4CAF50)
+                            tint = ProgressGreen
                         )
                     },
                     placeholder = {
@@ -92,15 +100,15 @@ fun SettingsScreen(navController: NavController) {
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = Color.White,
                         unfocusedContainerColor = Color.White,
-                        focusedBorderColor = Color(0xFF4CAF50),
-                        unfocusedBorderColor = Color(0xFFE0E0E0),
-                        cursorColor = Color(0xFF4CAF50)
+                        focusedBorderColor = ProgressGreen,
+                        unfocusedBorderColor = TreeGreen,
+                        cursorColor = ProgressGreen
                     )
                 )
 
                 Spacer(modifier = Modifier.height(48.dp))
 
-                // Save Goal 绿色按钮（带 ✓ 图标）
+                // Save Goal green button (with ✓ icon)
                 Button(
                     onClick = {
                         val newGoal = goalText.toIntOrNull() ?: 10000
@@ -114,7 +122,7 @@ fun SettingsScreen(navController: NavController) {
                         .fillMaxWidth()
                         .height(64.dp),
                     shape = RoundedCornerShape(32.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                    colors = ButtonDefaults.buttonColors(containerColor = ProgressGreen),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
                 ) {
                     Row(
@@ -139,17 +147,22 @@ fun SettingsScreen(navController: NavController) {
 
                 Spacer(modifier = Modifier.height(28.dp))
 
-                // Reset Tree 按钮（彻底修复 null 问题 + 完美重置逻辑）
+                // Reset Tree button
                 Button(
                     onClick = {
-                        coroutineScope.launch {
-                            context.dataStore.edit { prefs ->
-                                // 1. 当天步数立刻清零 → 树马上变回小苗
-                                prefs[UserPreferences.DAILY_STEPS_KEY] = 0
-                                // 2. 删除累计基数和日期记录
-                                //    下次走路时会以当前传感器值作为新起点，完美从0开始
-                                prefs.remove(UserPreferences.LAST_TOTAL_STEPS_KEY)
-                                prefs.remove(UserPreferences.LAST_DATE_KEY)
+                        if (currentEmail.isNotBlank()) {  // Guard against blank email
+                            coroutineScope.launch {
+                                context.dataStore.edit { prefs ->
+                                    // 1. Immediately reset daily steps to 0 → Tree reverts to seedling
+                                    val dailyStepsKey = intPreferencesKey("daily_steps_$currentEmail")
+                                    prefs[dailyStepsKey] = 0
+                                    // 2. Remove cumulative base and date records
+                                    //    Next walk will use current sensor value as new starting point, perfect reset from 0
+                                    val lastTotalStepsKey = longPreferencesKey("last_total_steps_$currentEmail")
+                                    val lastDateKey = stringPreferencesKey("last_date_$currentEmail")
+                                    prefs.remove(lastTotalStepsKey)
+                                    prefs.remove(lastDateKey)
+                                }
                             }
                         }
                     },
@@ -163,6 +176,37 @@ fun SettingsScreen(navController: NavController) {
                     Text(
                         "Reset Tree",
                         fontSize = 18.sp,
+                        color = Color(0xFF666666),  // Matches TreeLoginSecondaryText
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(28.dp))
+
+                // Logout button
+                Button(
+                    onClick = {
+                        coroutineScope.launch {
+                            val isLoggedInKey = booleanPreferencesKey("is_logged_in")
+                            context.dataStore.edit { prefs ->
+                                prefs[isLoggedInKey] = false
+                            }
+                            // Navigate back to login screen and clear the back stack
+                            navController.navigate("login") {
+                                popUpTo(0) { inclusive = true }
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp),
+                    shape = RoundedCornerShape(32.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFEEEEEE)),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    Text(
+                        "log out ",
+                        fontSize = 18.sp,
                         color = Color(0xFF666666),
                         fontWeight = FontWeight.Medium
                     )
@@ -170,11 +214,11 @@ fun SettingsScreen(navController: NavController) {
             }
         }
 
-        // Back to Home（位置与截图完全一致）
+        // Back to Home
         Text(
             text = "Back to Home",
             fontSize = 17.sp,
-            color = Color(0xFF666666),
+            color = Color(0xFF666666),  // Matches TreeLoginSecondaryText
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 60.dp)

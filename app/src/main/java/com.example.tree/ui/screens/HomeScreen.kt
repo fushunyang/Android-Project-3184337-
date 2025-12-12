@@ -5,32 +5,32 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.navigation.NavController
-import com.example.tree.R
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.ui.graphics.Color
-import androidx.datastore.preferences.core.edit
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.navigation.NavController
+import com.example.tree.R
 import com.example.tree.data.UserPreferences
 import com.example.tree.data.dataStore
 import com.example.tree.ui.theme.*
@@ -38,8 +38,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.min
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlin.math.sqrt
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.text.font.FontWeight
+import androidx.datastore.preferences.core.edit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -48,186 +53,415 @@ fun HomeScreen(navController: NavController) {
         val context = LocalContext.current
         val coroutineScope = rememberCoroutineScope()
         val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
-        val colorScheme = MaterialTheme.colorScheme
+
+        val currentEmail by UserPreferences.savedEmailFlow(context).collectAsState(initial = "")
 
         val dailyGoal by UserPreferences.goalFlow(context).collectAsState(initial = 10000)
         val dailySteps by UserPreferences.dailyStepsFlow(context).collectAsState(initial = 0)
+
         val progress = (dailySteps.toFloat() / dailyGoal.coerceAtLeast(1)).coerceAtMost(1f)
-        val treeScale = 0.7f + progress * 1.4f
-        val animatedProgress by animateFloatAsState(progress)
-        val animatedScale by animateFloatAsState(treeScale)
+        val animatedProgress by animateFloatAsState(progress, tween(1200))
 
-        // Calculate tree stage based on steps (every 1000 steps, up to 7 stages)
-        val treeStage = min(7, (dailySteps / 1000) + 1)
-        val treeResourceId = when (treeStage) {
-            1 -> R.drawable.stage1 //  (stage 1: 0-999 steps)
-            2 -> R.drawable.stage2 //  (stage 2: 1000-1999 steps)
-            3 -> R.drawable.stage3 //  (stage 3: 2000-2999 steps)
-            4 -> R.drawable.stage4 //  (stage 4: 3000-3999 steps)
-            5 -> R.drawable.stage5 //  (stage 5: 4000-4999 steps)
-            6 -> R.drawable.stage6 //  (stage 6: 5000-5999 steps)
-            7 -> R.drawable.stage7 //  (stage 7: 6000+ steps)
-            else -> R.drawable.stage1
-        }
+        val treeStage = ((dailySteps / 10) + 1).coerceIn(1, 7)
 
-        // step count
-        val stepCounterSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
-        if (stepCounterSensor != null) {
-            val listener = remember {
-                object : SensorEventListener {
-                    override fun onSensorChanged(event: SensorEvent?) {
-                        event ?: return
-                        val total = event.values[0].toLong()
-                        coroutineScope.launch {
-                            val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                            val data = context.dataStore.data.first()
-                            val savedDate = data[UserPreferences.LAST_DATE_KEY] ?: today
-                            val savedTotal = data[UserPreferences.LAST_TOTAL_STEPS_KEY] ?: total
-                            var currentDaily = data[UserPreferences.DAILY_STEPS_KEY] ?: 0
+        /* ====================== Auto-check date on app launch and save history if needed ====================== */
+        LaunchedEffect(Unit) {
+            if (currentEmail.isBlank()) return@LaunchedEffect
 
-                            var delta = total - savedTotal
-                            if (delta < 0) delta = total
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            val data = context.dataStore.data.first()
 
-                            if (savedDate != today) currentDaily = delta.toInt().coerceAtLeast(0)
-                            else currentDaily += delta.toInt().coerceAtLeast(0)
+            val lastDateKey = UserPreferences.lastDateKey(currentEmail)
+            val dailyKey = UserPreferences.dailyStepsKey(currentEmail)
 
-                            context.dataStore.edit {
-                                it[UserPreferences.DAILY_STEPS_KEY] = currentDaily
-                                it[UserPreferences.LAST_TOTAL_STEPS_KEY] = total
-                                it[UserPreferences.LAST_DATE_KEY] = today
-                            }
-                        }
-                    }
-                    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+            val savedDate = data[lastDateKey] ?: today
+            val currentDaily = data[dailyKey] ?: 0
+
+            if (savedDate != today && currentDaily > 0) {
+                UserPreferences.savePreviousDayToHistory(context, savedDate, currentDaily)
+
+                context.dataStore.edit {
+                    it[dailyKey] = 0
+                    it[lastDateKey] = today
                 }
             }
-            DisposableEffect(Unit) {
-                sensorManager.registerListener(listener, stepCounterSensor, SensorManager.SENSOR_DELAY_NORMAL)
-                onDispose { sensorManager.unregisterListener(listener) }
-            }
-        } else {
-            // Accelerometer
-            val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-            if (accelerometer != null) {
-                var lastStepTime by remember { mutableLongStateOf(0L) }
-                val listener = remember {
+        }
+
+        /* ====================== Ultimate Step Counting System: Hardware Counter > Detector > Accelerometer Fallback ====================== */
+        DisposableEffect(currentEmail) {
+            var registeredListener: SensorEventListener? = null
+
+            if (currentEmail.isNotBlank()) {
+                val stepCounter = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+                val stepDetector = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
+                val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+                // Unified +1 step logic (shared by detector & accelerometer)
+                val incrementStep = {
+                    coroutineScope.launch {
+                        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                        val data = context.dataStore.data.first()
+
+                        val lastDateKey = UserPreferences.lastDateKey(currentEmail)
+                        val dailyKey = UserPreferences.dailyStepsKey(currentEmail)
+
+                        val savedDate = data[lastDateKey] ?: today
+                        var currentDaily = data[dailyKey] ?: 0
+
+                        if (savedDate != today) {
+                            if (currentDaily > 0) {
+                                UserPreferences.savePreviousDayToHistory(context, savedDate, currentDaily)
+                            }
+                            currentDaily = 0
+                        }
+
+                        currentDaily += 1
+
+                        context.dataStore.edit {
+                            it[dailyKey] = currentDaily
+                            it[lastDateKey] = today
+                        }
+                    }
+                }
+
+                val listener = if (stepCounter != null) {
+                    // Hardware Step Counter (most accurate method)
                     object : SensorEventListener {
                         override fun onSensorChanged(event: SensorEvent?) {
                             event ?: return
-                            val mag = sqrt(event.values[0]*event.values[0] + event.values[1]*event.values[1] + event.values[2]*event.values[2])
-                            if (mag > 13.5f) {
-                                val now = System.currentTimeMillis()
-                                if (now - lastStepTime > 380) {
-                                    coroutineScope.launch {
-                                        context.dataStore.edit {
-                                            it[UserPreferences.DAILY_STEPS_KEY] = (dailySteps + 1).coerceAtLeast(0)
-                                        }
+                            val total = event.values[0].toLong()
+
+                            coroutineScope.launch {
+                                val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                                val data = context.dataStore.data.first()
+
+                                val lastDateKey = UserPreferences.lastDateKey(currentEmail)
+                                val lastTotalKey = UserPreferences.lastTotalStepsKey(currentEmail)
+                                val dailyKey = UserPreferences.dailyStepsKey(currentEmail)
+
+                                val savedDate = data[lastDateKey] ?: today
+                                val savedTotal = data[lastTotalKey] ?: total
+                                var currentDaily = data[dailyKey] ?: 0
+
+                                var delta = total - savedTotal
+                                if (delta < 0) delta = total
+
+                                if (savedDate != today) {
+                                    if (currentDaily > 0) {
+                                        UserPreferences.savePreviousDayToHistory(context, savedDate, currentDaily)
                                     }
-                                    lastStepTime = now
+                                    currentDaily = delta.toInt().coerceAtLeast(0)
+                                } else {
+                                    currentDaily += delta.toInt().coerceAtLeast(0)
+                                }
+
+                                context.dataStore.edit {
+                                    it[dailyKey] = currentDaily
+                                    it[lastTotalKey] = total
+                                    it[lastDateKey] = today
                                 }
                             }
                         }
+
+                        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                    }
+                } else if (stepDetector != null) {
+                    // Step Detector (increments +1 per event) - FIXED: Ignore initial spurious event
+                    object : SensorEventListener {
+                        private var ignoreInitialEvent = true
+
+                        override fun onSensorChanged(event: SensorEvent?) {
+                            if (ignoreInitialEvent) {
+                                ignoreInitialEvent = false
+                                return
+                            }
+                            if (event?.values?.get(0) == 1.0f) incrementStep()
+                        }
+
+                        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                    }
+                } else {
+                    // Accelerometer (high-sensitivity mode: simple peak detection) - OPTIMIZED: Less sensitive
+                    var lastStepTime = 0L
+                    var lastMagnitude = 0f
+                    val stepThreshold = 1.5f  // OPTIMIZED: Raised from 1.2f to reduce false positives
+                    val minStepInterval = 500L  // OPTIMIZED: Increased from 400L for better noise filtering
+
+                    object : SensorEventListener {
+                        private var ignoreInitialEvent = true
+
+                        override fun onSensorChanged(event: SensorEvent?) {
+                            if (ignoreInitialEvent) {
+                                ignoreInitialEvent = false
+                                event?.let { lastMagnitude = sqrt(it.values[0]*it.values[0] + it.values[1]*it.values[1] + it.values[2]*it.values[2]) }
+                                return
+                            }
+                            event ?: return
+                            val x = event.values[0]
+                            val y = event.values[1]
+                            val z = event.values[2]
+                            val magnitude = sqrt(x * x + y * y + z * z)
+                            val currentTime = System.currentTimeMillis()
+
+                            // Detect peak: Magnitude exceeds threshold, increasing from previous, and sufficient time elapsed
+                            if (magnitude > stepThreshold &&
+                                magnitude > lastMagnitude &&
+                                (currentTime - lastStepTime) > minStepInterval) {
+                                incrementStep()
+                                lastStepTime = currentTime
+                            }
+
+                            lastMagnitude = magnitude
+                        }
+
                         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
                     }
                 }
-                DisposableEffect(Unit) {
-                    sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_UI)
-                    onDispose { sensorManager.unregisterListener(listener) }
-                }
+
+                val sensorToUse = stepCounter ?: stepDetector ?: accelerometer!!
+                val delay = if (sensorToUse.type == Sensor.TYPE_ACCELEROMETER) SensorManager.SENSOR_DELAY_GAME else SensorManager.SENSOR_DELAY_UI
+                sensorManager.registerListener(listener, sensorToUse, delay)
+                registeredListener = listener
+            }
+
+            onDispose {
+                registeredListener?.let { sensorManager.unregisterListener(it) }
             }
         }
 
-        Scaffold(
-            containerColor = Color.Transparent,
-            bottomBar = {
-                NavigationBar(containerColor = colorScheme.surface.copy(alpha = 0.96f), tonalElevation = 20.dp) {
-                    NavigationBarItem(
-                        selected = false,
-                        onClick = { navController.navigate("settings") },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = "Settings") },
-                        label = { Text("Settings", color = TreeTextGood.copy(alpha = 0.8f)) }
-                    )
-                    NavigationBarItem(
-                        selected = false,
-                        onClick = { navController.navigate("history") },
-                        icon = { Icon(Icons.Default.History, contentDescription = "History") },
-                        label = { Text("History", color = TreeTextGood.copy(alpha = 0.8f)) }
-                    )
-                    NavigationBarItem(
-                        selected = true,
-                        onClick = { navController.navigate("status") },
-                        icon = { Icon(Icons.Default.Info, contentDescription = "Status") },
-                        label = { Text("Status", color = colorScheme.primary) }
+        /* ================================== UI (Using Crossfade for smooth scene transitions) ================================== */
+        Box(modifier = Modifier.fillMaxSize()) {
+            // Use Crossfade to smoothly transition background images
+            Crossfade(
+                targetState = treeStage,
+                modifier = Modifier.fillMaxSize(),
+                animationSpec = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+                label = "stage_transition"
+            ) { currentStage ->
+                val currentResourceId = when (currentStage) {
+                    1 -> R.drawable.stage1
+                    2 -> R.drawable.stage2
+                    3 -> R.drawable.stage3
+                    4 -> R.drawable.stage4
+                    5 -> R.drawable.stage5
+                    6 -> R.drawable.stage6
+                    else -> R.drawable.stage7
+                }
+                Image(
+                    painter = painterResource(currentResourceId),
+                    contentDescription = "Tree Stage with Background",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+
+            // Foreground UI: Progress ring on top, buttons at bottom
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Top section: Progress ring
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Spacer(modifier = Modifier.height(40.dp))
+
+                    CreativeProgressRing(
+                        progress = animatedProgress,
+                        dailySteps = dailySteps,
+                        dailyGoal = dailyGoal
                     )
                 }
-            }
-        ) { paddingValues ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        brush = Brush.verticalGradient(
-                            listOf(colorScheme.treeBgTop, colorScheme.treeBgMid1, colorScheme.treeBgMid2, colorScheme.treeBgBottom)
-                        )
-                    )
-                    .padding(paddingValues)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 28.dp, vertical = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Spacer(Modifier.height(60.dp))
 
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
-                            progress = { animatedProgress },
-                            modifier = Modifier.size(240.dp),
-                            strokeWidth = 22.dp,
-                            color = colorScheme.primary,
-                            trackColor = colorScheme.outline.copy(alpha = 0.3f)
+                // Bottom section: Button row (with gradient overlay and text labels)
+                Spacer(modifier = Modifier.height(40.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                listOf(
+                                    OverlayTransparent,
+                                    OverlayWhiteSemi,
+                                    OverlayWhiteOpaque
+                                )
+                            )
                         )
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("$dailySteps", fontSize = 64.sp, fontWeight = FontWeight.Black, color = TreeStepBig)
-                            Text("/ $dailyGoal steps", fontSize = 20.sp, color = TreeGoalText)
+                        .padding(horizontal = 16.dp, vertical = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        // History button: Icon + text
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clickable { navController.navigate("history") }
+                                .padding(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.History,
+                                contentDescription = "History Screen",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "History Screen",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Status button: Icon + text
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clickable { navController.navigate("status") }
+                                .padding(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = "Status Screen",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "Status Screen",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Settings button: Icon + text
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .clickable { navController.navigate("settings") }
+                                .padding(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Setting Screen",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "Setting Screen",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
-
-                    Spacer(Modifier.height(80.dp))
-
-                    Image(
-                        painter = painterResource(treeResourceId),
-                        contentDescription = "Your Growing Tree - Stage $treeStage",
-                        modifier = Modifier.size(320.dp).scale(animatedScale).clip(RoundedCornerShape(40.dp))
-                    )
-
-                    Spacer(Modifier.height(40.dp))
-
-                    Card(
-                        modifier = Modifier.fillMaxWidth(0.92f),
-                        shape = RoundedCornerShape(36.dp),
-                        colors = CardDefaults.cardColors(containerColor = colorScheme.surface.copy(alpha = 0.97f)),
-                        elevation = CardDefaults.cardElevation(16.dp)
-                    ) {
-                        Text(
-                            text = when {
-                                progress >= 1f -> "Goal achieved! Your tree is now a towering giant! 🌳✨"
-                                progress >= 0.8f -> "Almost there! Just a few more steps!"
-                                progress >= 0.5f -> "Halfway done! Your tree is thriving!"
-                                else -> "Every step waters your little sapling. Keep going! 🌱"
-                            },
-                            modifier = Modifier.padding(24.dp),
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            color = colorScheme.onSurface,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-
-                    Spacer(Modifier.weight(1f))
                 }
             }
+        }
+    }
+}
+
+/* ====================== Progress Ring (with FastOutSlowInEasing animation) ====================== */
+@Composable
+private fun CreativeProgressRing(progress: Float, dailySteps: Int, dailyGoal: Int) {
+    val infiniteTransition = rememberInfiniteTransition(label = "ring")
+
+    val rotatingAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 16000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "leaf_rotation"
+    )
+
+    val pulse by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    Box(modifier = Modifier.size(320.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val canvasSize = minOf(size.width, size.height)
+            val ringRadius = canvasSize / 2f - 40.dp.toPx()
+            val strokeWidth = 20.dp.toPx()
+            val center = Offset(size.width / 2f, size.height / 2f)
+
+            // Background ring (light blue full ring)
+            drawCircle(
+                brush = Brush.sweepGradient(
+                    listOf(
+                        ProgressBgStart.copy(0.6f),
+                        ProgressBgMid1.copy(0.7f),
+                        ProgressBgMid2.copy(0.9f),
+                        ProgressBgEnd.copy(0.9f)
+                    )
+                ),
+                radius = ringRadius,
+                center = center,
+                style = Stroke(strokeWidth, cap = StrokeCap.Round)
+            )
+
+            // Progress green ring (pixel-perfect alignment, no vertical bars, no offsets)
+            if (progress > 0f) {
+                val arcDiameter = ringRadius * 2f
+                val arcSize = Size(arcDiameter, arcDiameter)
+                val arcTopLeft = Offset(center.x - ringRadius, center.y - ringRadius)
+
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        listOf(
+                            ProgressGreenDark,
+                            ProgressGreen,
+                            ProgressGreenLight1,
+                            ProgressGreenLight2
+                        )
+                    ),
+                    startAngle = -90f,
+                    sweepAngle = 360f * progress,
+                    useCenter = false,
+                    topLeft = arcTopLeft,
+                    size = arcSize,
+                    style = Stroke(strokeWidth, cap = StrokeCap.Round)
+                )
+            }
+
+            // Floating leaves (perfectly aligned on the same center and radius)
+            val leafCount = (progress * 15).toInt().coerceIn(3, 15)
+            for (i in 0 until leafCount) {
+                val angle = (360f / leafCount) * i + rotatingAngle
+                val rad = Math.toRadians(angle.toDouble())
+                val leafRadius = ringRadius * 0.72f
+                val x = center.x + leafRadius * cos(rad).toFloat()
+                val y = center.y + leafRadius * sin(rad).toFloat()
+                drawCircle(
+                    color = LeafGreen.copy(alpha = 0.75f + progress * 0.25f),
+                    radius = 12f,
+                    center = Offset(x, y)
+                )
+            }
+        }
+
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.scale(pulse)) {
+            Text("$dailySteps", fontSize = 78.sp, fontWeight = FontWeight.Black, color = TreeStepBig)
+            Text("/ $dailyGoal steps", fontSize = 19.sp, color = TreeGoalText)
+        }
+
+        if (progress > 0.01f) {
+            Text(
+                "Every step makes your little tree more lush!",
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 20.dp)
+            )
         }
     }
 }

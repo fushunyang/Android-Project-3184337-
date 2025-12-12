@@ -67,7 +67,7 @@ fun SplashScreen(navController: NavController) {
             )
             Spacer(Modifier.height(32.dp))
             Text(
-                "正在唤醒你的小树...",  // 注意：这里是UI文本，未翻译，因为它是用户可见的字符串。如果需要翻译成英文，可改为 "Waking up your little tree..."
+                "waking up your little tree...",
                 fontSize = 22.sp,
                 color = Color.White.copy(alpha = 0.95f)
             )

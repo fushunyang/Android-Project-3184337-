@@ -16,5 +16,6 @@ fun NavGraph(navController: NavHostController) {
         composable("settings") { SettingsScreen(navController) }
         composable("history") { HistoryScreen(navController) }
         composable("status") { StatusScreen(navController) }
+        composable("reset_password"){ ResetPasswordScreen(navController) }
     }
 }

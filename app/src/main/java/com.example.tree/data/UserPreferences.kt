@@ -1,3 +1,4 @@
+
 package com.example.tree.data
 
 import android.content.Context
@@ -12,9 +13,11 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "tr
 
 object UserPreferences {
     // ==================== Account Related ====================
-    val EMAIL_KEY = stringPreferencesKey("user_email")
-    val PASSWORD_KEY = stringPreferencesKey("user_password")
+    val EMAIL_KEY = stringPreferencesKey("current_user_email")  //
     val IS_LOGGED_IN_KEY = booleanPreferencesKey("is_logged_in")
+
+    // Per-email password key for multi-account isolation
+    fun passwordKey(email: String) = stringPreferencesKey("password_$email")
 
     // ==================== Dynamic Keys (Per-Email Independent Data) ====================
     fun dailyStepsKey(email: String) = intPreferencesKey("daily_steps_$email")
@@ -72,11 +75,31 @@ object UserPreferences {
         }
     }
 
+    // Save credentials for a specific email (supports multi-account)
     suspend fun saveCredentials(context: Context, email: String, password: String) {
+        val trimmedEmail = email.trim()
+        if (trimmedEmail.isBlank()) return
         context.dataStore.edit {
-            it[EMAIL_KEY] = email.trim()
-            it[PASSWORD_KEY] = password
+            it[passwordKey(trimmedEmail)] = password  // Per-email storage
+            it[EMAIL_KEY] = trimmedEmail  // Set as current user
             it[IS_LOGGED_IN_KEY] = true
         }
+    }
+
+    // Check if email is already registered
+    suspend fun isEmailRegistered(context: Context, email: String): Boolean {
+        val trimmedEmail = email.trim()
+        if (trimmedEmail.isBlank()) return false
+        val prefs = context.dataStore.data.first()
+        return prefs[passwordKey(trimmedEmail)] != null
+    }
+
+    // ==================== Verification for Login (Per-Email) ====================
+    suspend fun verifyCredentials(context: Context, email: String, password: String): Boolean {
+        val trimmedEmail = email.trim()
+        if (trimmedEmail.isBlank() || password.isBlank()) return false
+        val prefs = context.dataStore.data.first()
+        val savedPassword = prefs[passwordKey(trimmedEmail)] ?: ""
+        return savedPassword == password
     }
 }
